@@ -148,6 +148,32 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
   font-size:1.5rem; font-weight:800;
 }
 .next:hover{filter:brightness(1.08)}
+/* 전자시계: 오픈소스 7세그먼트 글꼴 DSEG (github.com/keshikan/DSEG, SIL OFL) */
+@font-face{font-family:"DSEG7"; src:url("lib/DSEG7Classic-Bold.woff2") format("woff2"); font-weight:700; font-display:block}
+.dclock{width:100%; container-type:inline-size}
+.dbody{
+  padding:5cqw 5cqw 4cqw; border-radius:8cqw; background:linear-gradient(160deg,#2b3657,#1a2238);
+  box-shadow:0 3.5cqw 7cqw rgba(30,39,64,.22), inset 0 .5cqw 0 rgba(255,255,255,.12);
+}
+.dscreen{
+  display:grid; justify-content:center; padding:6cqw 3cqw 11cqw; border-radius:4.5cqw;
+  background:linear-gradient(180deg,#dfe8dc,#eef3ea); box-shadow:inset 0 .8cqw 1.6cqw rgba(30,39,64,.22);
+  font-family:"DSEG7",monospace; font-weight:700; font-size:21cqw; line-height:1; color:#1e2740; white-space:nowrap;
+}
+.dscreen > *{grid-area:1/1}
+.dghost{opacity:.07}
+.dh,.dm{position:relative; display:inline-block}
+.dh::after,.dm::after{
+  position:absolute; left:0; right:0; top:calc(100% + 2cqw); text-align:center; display:none;
+  font-family:"Pretendard Variable",Pretendard,"Malgun Gothic",sans-serif; font-size:6cqw; font-weight:800;
+}
+.dh::after{content:"시"} .dm::after{content:"분"}
+.dclock.hint .dh{color:#d9480f} .dclock.hint .dm{color:#1864ab}
+.dclock.hint .dh::after,.dclock.hint .dm::after{display:block}
+.dbrand{margin-top:2.5cqw; text-align:center; font-size:3.6cqw; font-weight:700; letter-spacing:.35em; color:#8f9bbd}
+.page .dbody,.page .dscreen{box-shadow:none}
+.p-item .dclock{width:62mm; flex:none}
+.modebar{display:flex; flex-wrap:wrap; gap:.4rem 1rem}
 .modes{display:inline-flex; flex-wrap:wrap; background:#eeebe2; border-radius:999px; padding:.25rem; margin-bottom:1.2rem}
 .modes button{border:0; background:none; padding:.5rem 1.1rem; border-radius:999px; font-weight:700; font-size:1.05rem; color:var(--muted)}
 .modes button[aria-pressed="true"]{background:var(--ink); color:#fff}
@@ -243,16 +269,23 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
 
   <!-- 화면으로 풀기 -->
   <main id="playView" class="card no-print">
-    <div class="modes" role="group" aria-label="문제 종류">
-      <button type="button" id="modeRead" aria-pressed="true">📖 시계 읽기</button>
-      <button type="button" id="modeStop" aria-pressed="false">✋ 멈춰서 읽기</button>
+    <div class="modebar">
+      <div class="modes" role="group" aria-label="시계 종류">
+        <button type="button" id="kindAnalog" aria-pressed="true">🕒 바늘 시계</button>
+        <button type="button" id="kindDigital" aria-pressed="false">🔢 전자시계</button>
+      </div>
+      <div class="modes" role="group" aria-label="문제 종류">
+        <button type="button" id="modeRead" aria-pressed="true">📖 시계 읽기</button>
+        <button type="button" id="modeStop" aria-pressed="false">✋ 멈춰서 읽기</button>
+      </div>
     </div>
     <div class="stage">
       <div class="clock-side">
         <div class="clock" id="clock"></div>
+        <div class="clock" id="digital" hidden></div>
         <div class="legend">
-          <span class="chip h"><i></i>짧은 바늘 = 시</span>
-          <span class="chip m"><i></i>긴 바늘 = 분</span>
+          <span class="chip h"><i></i><span id="legH">짧은 바늘 = 시</span></span>
+          <span class="chip m"><i></i><span id="legM">긴 바늘 = 분</span></span>
         </div>
       </div>
       <div class="answer-side">
@@ -280,7 +313,7 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
       </fieldset>
       <fieldset>
         <legend>선택</legend>
-        <label class="pill"><input type="checkbox" id="optHint">분 숫자 보여 주기</label>
+        <label class="pill"><input type="checkbox" id="optHint"><span id="optHintText">분 숫자 보여 주기</span></label>
         <label class="pill"><input type="checkbox" id="optAns">정답지 함께</label>
       </fieldset>
       <div class="sheet-actions">
@@ -318,6 +351,7 @@ const state = {
   zoom: Math.min(ZOOMS.length-1, Math.max(0, store.get('zoom',0))),
   muted: !!store.get('muted', false),
   mode: store.get('mode','read') === 'stop' ? 'stop' : 'read',
+  kind: store.get('kind','analog') === 'digital' ? 'digital' : 'analog',   // 바늘 시계 / 전자시계
   phase: 'answer', T: 0,        // phase: running(움직임) → stopping(멈추는 중) → answer(답 고르기)
   hint: false, stars: 0, wrong: 0, solved: false,
   cur: null, choices: [], sheet: []
@@ -430,16 +464,39 @@ function renderLevels(){
 }
 $('#clock').innerHTML = `<div class="clockbox" role="img" aria-label="시계 그림"><div class="rc"></div><div id="mlabels" hidden>${labelsHTML()}</div></div>`;
 const mainClock = $('#clock .rc');
+
+/* ───────── 전자시계 ───────── */
+function digitalParts(T){
+  const t = Math.floor((((T%720)+720)%720) + 1e-6), h = Math.floor(t/60) || 12, m = t%60;
+  return {pad: h < 10 ? '!' : '', h: String(h), m: (m < 10 ? '0' : '') + m};   // '!' = 꺼진 숫자 칸
+}
+function digitalHTML(T, hint){
+  const d = digitalParts(T);
+  return `<div class="dclock${hint?' hint':''}" role="img" aria-label="전자시계 ${d.h}:${d.m}"><div class="dbody"><div class="dscreen"><span class="dghost">88:88</span><span class="dval"><span class="dpad">${d.pad}</span><span class="dh">${d.h}</span>:<span class="dm">${d.m}</span></span></div><div class="dbrand">CLOCK</div></div></div>`;
+}
+$('#digital').innerHTML = digitalHTML(0, false);
+const dEl = {box: $('#digital .dclock'), pad: $('#digital .dpad'), h: $('#digital .dh'), m: $('#digital .dm')};
+
 function renderClock(){
   if(state.phase === 'answer' && state.cur) state.T = minutesOf(state.cur);
+  const dig = state.kind === 'digital';
+  $('#clock').hidden = dig; $('#digital').hidden = !dig;
   $('#mlabels').hidden = !state.hint;
+  dEl.box.classList.toggle('hint', state.hint);
   setHands(state.T);
 }
 
 /* ───────── 움직이는 시계 (멈춰서 읽기) ───────── */
 const SPEED = 12;               // 1초에 12분씩 움직임 (긴 바늘 한 바퀴 5초)
 let raf = 0, lastTs = 0;
-function setHands(T){ Kit.render(mainClock, T); }   // T = 12시부터 지난 분
+function setHands(T){           // T = 12시부터 지난 분
+  if(state.kind === 'digital'){
+    const d = digitalParts(T);
+    if(dEl.h.textContent !== d.h){ dEl.h.textContent = d.h; dEl.pad.textContent = d.pad; }
+    if(dEl.m.textContent !== d.m) dEl.m.textContent = d.m;
+    dEl.box.setAttribute('aria-label', `전자시계 ${d.h}:${d.m}`);
+  }else Kit.render(mainClock, T);
+}
 function startRun(){
   cancelAnimationFrame(raf); lastTs = 0;
   const loop = ts => {
@@ -479,6 +536,12 @@ function renderHint(){
   btn.setAttribute('aria-pressed', state.hint);
   box.hidden = !state.hint;
   if(!state.hint) return;
+  if(state.kind === 'digital'){
+    box.innerHTML = `<p>① 점 두 개( : ) <span class="hh">앞 숫자</span>가 <b>몇 시</b>예요.</p>` + (state.level === 1
+      ? `<p>② <span class="mm">뒤 숫자</span>가 00이면 <b>정각</b>이에요.</p>`
+      : `<p>② 점 두 개( : ) <span class="mm">뒤 숫자</span>가 <b>몇 분</b>이에요. (05는 5분)</p>`);
+    return;
+  }
   box.innerHTML = state.level === 1
     ? `<p>① <span class="mm">긴 바늘</span>이 12에 있으면 <b>정각</b>이에요.</p><p>② <span class="hh">짧은 바늘</span>이 가리키는 숫자를 읽어요.</p>`
     : `<p>① <span class="hh">짧은 바늘</span>을 먼저 봐요. 지나온 숫자가 <b>몇 시</b>예요.</p><p>② <span class="mm">긴 바늘</span>을 봐요. 바깥 파란 숫자가 <b>몇 분</b>이에요.</p>`;
@@ -508,6 +571,15 @@ function newQuestion(){
     showChoices();
   }
 }
+function applyKind(){
+  const dig = state.kind === 'digital';
+  $('#kindAnalog').setAttribute('aria-pressed', !dig);
+  $('#kindDigital').setAttribute('aria-pressed', dig);
+  $('#legH').textContent = dig ? '앞 숫자 = 시' : '짧은 바늘 = 시';
+  $('#legM').textContent = dig ? '뒤 숫자 = 분' : '긴 바늘 = 분';
+  $('#optHintText').textContent = dig ? '시·분 표시 넣기' : '분 숫자 보여 주기';
+  store.set('kind', state.kind);
+}
 function applyMode(){
   $('#modeRead').setAttribute('aria-pressed', state.mode === 'read');
   $('#modeStop').setAttribute('aria-pressed', state.mode === 'stop');
@@ -529,9 +601,10 @@ function onChoice(btn){
   document.querySelectorAll('.choice').forEach(b => { b.disabled = true; b.classList.add(b === btn ? 'right' : 'dim'); });
   $('#stars').textContent = `⭐ ${state.stars}개`;
   const onHour = p.m === 0;
+  const dig = state.kind === 'digital', nh = dig ? '앞 숫자' : '짧은 바늘', nm = dig ? '뒤 숫자' : '긴 바늘';
   const explain = onHour
-    ? `<span class="hh">짧은 바늘</span> ${p.h} → <b>${p.h}시</b>`
-    : `<span class="hh">짧은 바늘</span> → ${p.h}시, <span class="mm">긴 바늘</span> → ${p.m}분`;
+    ? `<span class="hh">${nh}</span> ${p.h} → <b>${p.h}시</b>`
+    : `<span class="hh">${nh}</span> → ${p.h}시, <span class="mm">${nm}</span> → ${p.m}분`;
   fb.className = 'feedback ok';
   fb.innerHTML = `<strong>🎉 ${PRAISE[rand(PRAISE.length)]}</strong>${fmt(p)}${onHour ? '예요' : '이에요'}. (${explain})` +
     (onHour ? `<div class="chimes">${'<span class="bell">🔔</span>'.repeat(p.h)}<span class="chime-count" id="chimeCount"></span></div>` : '');
@@ -562,18 +635,18 @@ function genSheet(){
   state.sheet = list; renderSheet();
 }
 function pageHTML(items, offset, pageNo, total, withAns){
-  const l = levelOf(), hint = $('#optHint').checked;
+  const l = levelOf(), hint = $('#optHint').checked, dig = state.kind === 'digital';
   const cells = items.map((p, i) => {
     const hour = `<span class="p-blank">${withAns ? p.h : ''}</span>시`;
     const min = l.id === 1 ? '' : `<span class="p-blank">${withAns ? p.m : ''}</span>분`;
-    return `<div class="p-item"><span class="p-num">${offset+i+1}</span>${clockHTML(minutesOf(p), hint)}<div class="p-ans">${hour}${min}</div></div>`;
+    return `<div class="p-item"><span class="p-num">${offset+i+1}</span>${dig ? digitalHTML(minutesOf(p), hint) : clockHTML(minutesOf(p), hint)}<div class="p-ans">${hour}${min}</div></div>`;
   }).join('');
   return `<article class="page">
     <div class="p-head"><div class="p-title">시계 보기 학습지</div><div class="p-badge${withAns?' ans':''}">${withAns?'정답 · ':''}${l.id}단계 · ${l.name}</div></div>
     <div class="p-info"><span>이름 <u style="width:45mm"></u></span><span>날짜 <u style="width:14mm"></u>월 <u style="width:14mm"></u>일</span></div>
-    <div class="p-guide">시계를 보고 ${l.id===1?'몇 시':'몇 시 몇 분'}인지 빈칸에 쓰세요.</div>
+    <div class="p-guide">${dig?'전자시계':'시계'}를 보고 ${l.id===1?'몇 시':'몇 시 몇 분'}인지 빈칸에 쓰세요.</div>
     <div class="p-grid">${cells}</div>
-    <div class="p-foot"><div><span class="k kh"><i></i>짧은 바늘 = 시</span><span class="k km"><i></i>긴 바늘 = 분</span></div><div>${pageNo} / ${total}</div></div>
+    <div class="p-foot"><div><span class="k kh"><i></i>${dig?'앞 숫자':'짧은 바늘'} = 시</span><span class="k km"><i></i>${dig?'뒤 숫자':'긴 바늘'} = 분</span></div><div>${pageNo} / ${total}</div></div>
   </article>`;
 }
 function renderSheet(){
@@ -623,6 +696,9 @@ $('#levels').onclick = e => {
 $('#choices').onclick = e => { const b = e.target.closest('.choice'); if(b) onChoice(b); };
 $('#nextBtn').onclick = newQuestion;
 $('#stopBtn').onclick = stopRun;
+const setKind = k => { state.kind = k; applyKind(); state.cur = null; newQuestion(); renderSheet(); };
+$('#kindAnalog').onclick = () => setKind('analog');
+$('#kindDigital').onclick = () => setKind('digital');
 $('#modeRead').onclick = () => { state.mode = 'read'; applyMode(); state.cur = null; newQuestion(); };
 $('#modeStop').onclick = () => { state.mode = 'stop'; applyMode(); newQuestion(); };
 $('#hintBtn').onclick = () => { state.hint = !state.hint; renderClock(); renderHint(); };
@@ -632,7 +708,7 @@ $('#optAns').onchange = renderSheet;
 $('#regenBtn').onclick = genSheet;
 $('#printBtn').onclick = () => window.print();
 
-applyZoom(); applySound(); applyMode(); renderLevels(); newQuestion(); genSheet();
+applyZoom(); applySound(); applyKind(); applyMode(); renderLevels(); newQuestion(); genSheet();
 })();
 </script>
 </body>
