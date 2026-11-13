@@ -119,6 +119,16 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
   font-size:1.5rem; font-weight:800;
 }
 .next:hover{filter:brightness(1.08)}
+.modes{display:inline-flex; flex-wrap:wrap; background:#eeebe2; border-radius:999px; padding:.25rem; margin-bottom:1.2rem}
+.modes button{border:0; background:none; padding:.5rem 1.1rem; border-radius:999px; font-weight:700; font-size:1.05rem; color:var(--muted)}
+.modes button[aria-pressed="true"]{background:var(--ink); color:#fff}
+.stop{
+  width:100%; min-height:6.5rem; border:0; border-radius:1.3rem; background:var(--hour); color:#fff;
+  font-size:2.2rem; font-weight:800; box-shadow:0 .35rem 0 #b34100; transition:transform .08s, box-shadow .08s;
+}
+.stop:hover:not(:disabled){filter:brightness(1.06)}
+.stop:active:not(:disabled){transform:translateY(.25rem); box-shadow:0 .1rem 0 #b34100}
+.stop:disabled{opacity:.6; cursor:default}
 [hidden]{display:none!important}
 
 /* ── 종이 학습지 ── */
@@ -204,6 +214,10 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
 
   <!-- 화면으로 풀기 -->
   <main id="playView" class="card no-print">
+    <div class="modes" role="group" aria-label="문제 종류">
+      <button type="button" id="modeRead" aria-pressed="true">📖 시계 읽기</button>
+      <button type="button" id="modeStop" aria-pressed="false">✋ 멈춰서 읽기</button>
+    </div>
     <div class="stage">
       <div class="clock-side">
         <div class="clock" id="clock"></div>
@@ -218,6 +232,7 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
           <button type="button" class="hintbtn" id="hintBtn" aria-pressed="false">💡 도움 받기</button>
         </div>
         <h2 class="question" id="question">몇 시일까요?</h2>
+        <button type="button" class="stop" id="stopBtn" hidden>✋ 멈춤!</button>
         <div class="choices" id="choices"></div>
         <div class="hintbox" id="hintBox" hidden></div>
         <div class="feedback" id="feedback" aria-live="assertive"></div>
@@ -273,6 +288,8 @@ const state = {
   level: Math.min(4, Math.max(1, store.get('level',1))),
   zoom: Math.min(ZOOMS.length-1, Math.max(0, store.get('zoom',0))),
   muted: !!store.get('muted', false),
+  mode: store.get('mode','read') === 'stop' ? 'stop' : 'read',
+  phase: 'answer', T: 0,        // phase: running(움직임) → stopping(멈추는 중) → answer(답 고르기)
   hint: false, stars: 0, wrong: 0, solved: false,
   cur: null, choices: [], sheet: []
 };
@@ -296,8 +313,8 @@ function clockSVG(h, m, hint){
     }
   }
   const ah = (h%12)*30 + m*0.5, am = m*6;
-  s += `<line x1="0" y1="9" x2="0" y2="-47" stroke="${HOUR}" stroke-width="9" stroke-linecap="round" transform="rotate(${ah})"/>`;
-  s += `<line x1="0" y1="12" x2="0" y2="-82" stroke="${MIN}" stroke-width="5.5" stroke-linecap="round" transform="rotate(${am})"/>`;
+  s += `<line x1="0" y1="9" x2="0" y2="-47" stroke="${HOUR}" stroke-width="9" stroke-linecap="round" class="hand-h" transform="rotate(${ah})"/>`;
+  s += `<line x1="0" y1="12" x2="0" y2="-82" stroke="${MIN}" stroke-width="5.5" stroke-linecap="round" class="hand-m" transform="rotate(${am})"/>`;
   s += `<circle r="6.5" fill="${INK}"/><circle r="2" fill="#fff"/></svg>`;
   return s;
 }
@@ -389,7 +406,55 @@ function renderLevels(){
     `<button type="button" class="level" data-level="${l.id}" aria-pressed="${l.id===state.level}"><small>${l.id}단계</small><b>${l.name}</b><span>예) ${l.ex}</span></button>`
   ).join('');
 }
-function renderClock(){ $('#clock').innerHTML = clockSVG(state.cur.h, state.cur.m, state.hint); }
+function renderClock(){
+  const p = state.cur || {h:12, m:0};
+  $('#clock').innerHTML = clockSVG(p.h, p.m, state.hint);
+  if(state.phase !== 'answer') setHands(state.T);
+}
+
+/* ───────── 움직이는 시계 (멈춰서 읽기) ───────── */
+const SPEED = 12;               // 1초에 12분씩 움직임 (긴 바늘 한 바퀴 5초)
+let raf = 0, lastTs = 0;
+function setHands(T){           // T = 12시부터 지난 분
+  const c = $('#clock'), hh = c.querySelector('.hand-h'), mm = c.querySelector('.hand-m');
+  if(!hh) return;
+  hh.setAttribute('transform', `rotate(${(T/2)%360})`);
+  mm.setAttribute('transform', `rotate(${(T*6)%360})`);
+}
+function startRun(){
+  cancelAnimationFrame(raf); lastTs = 0;
+  const loop = ts => {
+    if(lastTs) state.T += Math.min(.1, (ts-lastTs)/1000)*SPEED;
+    lastTs = ts; setHands(state.T);
+    raf = requestAnimationFrame(loop);
+  };
+  raf = requestAnimationFrame(loop);
+}
+function stopRun(){
+  if(state.phase !== 'running') return;
+  cancelAnimationFrame(raf);
+  state.phase = 'stopping'; $('#stopBtn').disabled = true;
+  if(!state.muted && newBus()) tone(880, ctx.currentTime+.01, .09, 'square', .09);
+  // 단계에 맞는 눈금까지 천천히 가서 멈춤 (정각 / 30분 / 10분 / 5분)
+  const step = levelOf().step, from = state.T, to = Math.ceil(from/step)*step;
+  const dur = Math.min(1200, Math.max(250, (to-from)/SPEED*2000));
+  let t0 = 0;
+  const finish = () => {
+    if(state.phase !== 'stopping') return;
+    cancelAnimationFrame(raf);
+    const t = ((Math.round(to)%720)+720)%720;
+    state.T = t; state.cur = {h: Math.floor(t/60) || 12, m: t%60}; state.phase = 'answer';
+    showChoices();
+  };
+  const anim = ts => {
+    if(!t0) t0 = ts;
+    const k = Math.min(1, Math.max(0, (ts-t0)/dur));
+    state.T = from + (to-from)*(1-(1-k)*(1-k)); setHands(state.T);
+    if(k < 1) raf = requestAnimationFrame(anim); else finish();
+  };
+  raf = requestAnimationFrame(anim);
+  timers.push(setTimeout(finish, dur+300));   // 화면이 가려져 있어도 반드시 멈추도록
+}
 function renderHint(){
   const box = $('#hintBox'), btn = $('#hintBtn');
   btn.setAttribute('aria-pressed', state.hint);
@@ -399,17 +464,35 @@ function renderHint(){
     ? `<p>① <span class="mm">긴 바늘</span>이 12에 있으면 <b>정각</b>이에요.</p><p>② <span class="hh">짧은 바늘</span>이 가리키는 숫자를 읽어요.</p>`
     : `<p>① <span class="hh">짧은 바늘</span>을 먼저 봐요. 지나온 숫자가 <b>몇 시</b>예요.</p><p>② <span class="mm">긴 바늘</span>을 봐요. 바깥 파란 숫자가 <b>몇 분</b>이에요.</p>`;
 }
-function newQuestion(){
-  clearTimers(); stopSound();
-  const step = levelOf().step;
-  state.cur = randomProblem(step, state.cur ? new Set([key(state.cur)]) : null);
-  state.choices = makeChoices(state.cur, step);
-  state.wrong = 0; state.solved = false; state.hint = false;
+function showChoices(){
+  state.choices = makeChoices(state.cur, levelOf().step);
   $('#question').textContent = state.level === 1 ? '몇 시일까요?' : '몇 시 몇 분일까요?';
-  $('#choices').innerHTML = state.choices.map(c => `<button type="button" class="choice" data-key="${key(c)}">${fmt(c)}</button>`).join('');
+  const box = $('#choices');
+  box.innerHTML = state.choices.map(c => `<button type="button" class="choice" data-key="${key(c)}">${fmt(c)}</button>`).join('');
+  box.hidden = false; $('#stopBtn').hidden = true;
+  renderClock(); renderHint();
+}
+function newQuestion(){
+  clearTimers(); stopSound(); cancelAnimationFrame(raf);
+  state.wrong = 0; state.solved = false; state.hint = false;
   const fb = $('#feedback'); fb.className = 'feedback'; fb.innerHTML = '';
   $('#nextBtn').hidden = true;
-  renderClock(); renderHint();
+  if(state.mode === 'stop'){
+    state.phase = 'running'; state.cur = null; state.T = rand(720);
+    $('#question').textContent = '시계가 움직여요. 멈춤을 눌러요!';
+    const box = $('#choices'); box.innerHTML = ''; box.hidden = true;
+    const sb = $('#stopBtn'); sb.hidden = false; sb.disabled = false;
+    renderClock(); renderHint(); startRun();
+  }else{
+    state.phase = 'answer';
+    state.cur = randomProblem(levelOf().step, state.cur ? new Set([key(state.cur)]) : null);
+    showChoices();
+  }
+}
+function applyMode(){
+  $('#modeRead').setAttribute('aria-pressed', state.mode === 'read');
+  $('#modeStop').setAttribute('aria-pressed', state.mode === 'stop');
+  store.set('mode', state.mode);
 }
 function onChoice(btn){
   if(state.solved || btn.disabled) return;
@@ -500,7 +583,8 @@ function showTab(sheet){
   $('#tabPlay').setAttribute('aria-selected', !sheet);
   $('#tabSheet').setAttribute('aria-selected', sheet);
   $('#playView').hidden = sheet; $('#sheetView').hidden = !sheet;
-  if(sheet){ clearTimers(); stopSound(); }
+  if(sheet){ clearTimers(); stopSound(); cancelAnimationFrame(raf); }
+  else if(state.phase !== 'answer') newQuestion();
 }
 
 $('#zoomIn').onclick = () => { if(state.zoom < ZOOMS.length-1){ state.zoom++; applyZoom(); } };
@@ -515,6 +599,9 @@ $('#levels').onclick = e => {
 };
 $('#choices').onclick = e => { const b = e.target.closest('.choice'); if(b) onChoice(b); };
 $('#nextBtn').onclick = newQuestion;
+$('#stopBtn').onclick = stopRun;
+$('#modeRead').onclick = () => { state.mode = 'read'; applyMode(); state.cur = null; newQuestion(); };
+$('#modeStop').onclick = () => { state.mode = 'stop'; applyMode(); newQuestion(); };
 $('#hintBtn').onclick = () => { state.hint = !state.hint; renderClock(); renderHint(); };
 document.querySelectorAll('input[name="cnt"]').forEach(r => r.onchange = genSheet);
 $('#optHint').onchange = renderSheet;
@@ -522,7 +609,7 @@ $('#optAns').onchange = renderSheet;
 $('#regenBtn').onclick = genSheet;
 $('#printBtn').onclick = () => window.print();
 
-applyZoom(); applySound(); renderLevels(); newQuestion(); genSheet();
+applyZoom(); applySound(); applyMode(); renderLevels(); newQuestion(); genSheet();
 })();
 </script>
 </body>
