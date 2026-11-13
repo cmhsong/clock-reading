@@ -8,6 +8,9 @@
 <!-- 오픈소스: Pretendard 글꼴 (github.com/orioncactus/pretendard, SIL OFL) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <!-- 오픈소스: canvas-confetti (github.com/catdad/canvas-confetti, ISC) — 인터넷이 없어도 되도록 lib 폴더에 저장 -->
+<!-- 오픈소스: react-clock (github.com/wojtekmaj/react-clock, MIT) — React와 함께 한 파일로 묶어 lib 폴더에 저장 -->
+<link rel="stylesheet" href="lib/react-clock.css">
+<script src="lib/react-clock.bundle.js"></script>
 <script src="lib/confetti.browser.min.js"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js';document.head.appendChild(s)"></script>
 
@@ -73,7 +76,33 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
 .stage{display:flex; flex-wrap:wrap; gap:1.5rem 2rem; align-items:center}
 .clock-side{flex:1 1 19rem; display:flex; flex-direction:column; align-items:center; gap:.8rem; min-width:0}
 .clock{width:min(23rem,100%)}
-.clock svg{display:block; width:100%; height:auto}
+
+/* 시계: react-clock 위에 입힌 디자인. 크기는 모두 시계 상자 너비(cqw) 기준이라 확대·인쇄에도 비율이 같다 */
+.clockbox{position:relative; width:100%; aspect-ratio:1; container-type:inline-size}
+.clockbox .rc{position:absolute; inset:9%}
+.react-clock__face{
+  border:1.7cqw solid #1e2740;
+  background:radial-gradient(circle at 50% 32%, #ffffff 0 52%, #f1f4fb 100%);
+  box-shadow:0 0 0 .9cqw #fff, 0 0 0 1.2cqw #d5dae6, 0 3.5cqw 7cqw rgba(30,39,64,.20);
+}
+.react-clock__mark__body{border-radius:99px}
+.react-clock__hour-mark__body{width:1.15cqw!important; background:#1e2740}
+.react-clock__minute-mark__body{width:.5cqw!important; background:#a3abbe}
+.react-clock__mark__number{
+  left:-10cqw; width:20cqw; margin-top:2.6cqw; font-size:8.6cqw; font-weight:800; line-height:1; color:#1e2740;
+  font-variant-numeric:tabular-nums; letter-spacing:-.03em;
+}
+.react-clock__hand__body{border-radius:99px; box-shadow:0 .7cqw 1.4cqw rgba(30,39,64,.28)}
+.react-clock__hour-hand__body{width:4.5cqw!important; background:linear-gradient(90deg,#f76707,#d9480f)}
+.react-clock__minute-hand__body{width:2.7cqw!important; background:linear-gradient(90deg,#228be6,#1864ab)}
+.react-clock::after{
+  content:""; position:absolute; left:50%; top:50%; width:7cqw; height:7cqw; transform:translate(-50%,-50%);
+  border-radius:50%; background:#1e2740; border:1.6cqw solid #fff; box-shadow:0 0 0 .6cqw #1e2740, 0 .6cqw 1.4cqw rgba(30,39,64,.3);
+}
+.mlabel{position:absolute; transform:translate(-50%,-50%); font-size:5.2cqw; font-weight:800; line-height:1; color:#1971c2; font-variant-numeric:tabular-nums}
+.page .react-clock__face{box-shadow:none}
+.page .react-clock__hand__body, .page .react-clock::after{box-shadow:none}
+.page .react-clock::after{box-shadow:0 0 0 .6cqw #1e2740}
 .legend{display:flex; flex-wrap:wrap; gap:.5rem; justify-content:center}
 .chip{display:inline-flex; align-items:center; gap:.45rem; padding:.3rem .8rem; border-radius:999px; font-weight:700; font-size:1rem}
 .chip i{display:inline-block; height:.4rem; border-radius:.2rem}
@@ -158,7 +187,7 @@ button:focus-visible, input:focus-visible{outline:.2rem solid var(--primary); ou
 .p-grid{flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:repeat(3,1fr); gap:4mm 5mm; margin-top:5mm}
 .p-item{position:relative; border:.4mm solid #cfd4e0; border-radius:5mm; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.5mm; padding:2mm; min-height:0}
 .p-num{position:absolute; top:2.5mm; left:2.5mm; width:9mm; height:9mm; border-radius:50%; background:#1e2740; color:#fff; font-weight:800; font-size:12pt; display:grid; place-items:center}
-.p-item svg{width:49mm; height:49mm; display:block}
+.p-item .clockbox{width:53mm; flex:none}
 .p-ans{display:flex; align-items:center; gap:2mm; font-size:17pt; font-weight:800}
 .p-blank{display:inline-grid; place-items:center; width:17mm; height:11mm; border:.5mm solid #1e2740; border-radius:2.5mm; color:#c92a2a; font-variant-numeric:tabular-nums}
 .p-foot{display:flex; justify-content:space-between; align-items:center; margin-top:4mm; font-size:10.5pt; font-weight:700; color:#5f6b85}
@@ -297,26 +326,19 @@ const levelOf = () => LEVELS[state.level-1];
 const key = p => p.h+':'+p.m;
 const fmt = p => p.m === 0 ? `${p.h}시` : `${p.h}시 ${p.m}분`;
 
-/* ───────── 시계 그림 (SVG) ───────── */
-function clockSVG(h, m, hint){
-  const INK='#1e2740', HOUR='#e8590c', MIN='#1971c2';
-  let s = `<svg viewBox="-125 -125 250 250" role="img" aria-label="시계 그림"><circle r="101" fill="#fff" stroke="${INK}" stroke-width="5"/>`;
-  for(let i=0;i<60;i++){
-    const a = i*6*Math.PI/180, big = i%5===0, r1 = big?86:91, r2 = 96;
-    s += `<line x1="${(Math.sin(a)*r1).toFixed(2)}" y1="${(-Math.cos(a)*r1).toFixed(2)}" x2="${(Math.sin(a)*r2).toFixed(2)}" y2="${(-Math.cos(a)*r2).toFixed(2)}" stroke="${INK}" stroke-width="${big?3:1.2}" stroke-linecap="round" opacity="${big?1:.55}"/>`;
-  }
+/* ───────── 시계 그림 (오픈소스 react-clock) ───────── */
+const Kit = window.ReactClockKit;
+const minutesOf = p => (p.h%12)*60 + p.m;     // 12시부터 지난 분
+function labelsHTML(){                        // 시계 바깥 '분' 숫자 (0, 5, 10 …)
+  let s = '';
   for(let n=1;n<=12;n++){
     const a = n*30*Math.PI/180;
-    s += `<text x="${(Math.sin(a)*70).toFixed(2)}" y="${(-Math.cos(a)*70).toFixed(2)}" dy=".36em" text-anchor="middle" font-size="22" font-weight="800" fill="${INK}">${n}</text>`;
-    if(hint){
-      s += `<text x="${(Math.sin(a)*114).toFixed(2)}" y="${(-Math.cos(a)*114).toFixed(2)}" dy=".36em" text-anchor="middle" font-size="12.5" font-weight="800" fill="${MIN}">${n===12?0:n*5}</text>`;
-    }
+    s += `<span class="mlabel" style="left:${(50+Math.sin(a)*46.5).toFixed(2)}%;top:${(50-Math.cos(a)*46.5).toFixed(2)}%">${n===12?0:n*5}</span>`;
   }
-  const ah = (h%12)*30 + m*0.5, am = m*6;
-  s += `<line x1="0" y1="9" x2="0" y2="-47" stroke="${HOUR}" stroke-width="9" stroke-linecap="round" class="hand-h" transform="rotate(${ah})"/>`;
-  s += `<line x1="0" y1="12" x2="0" y2="-82" stroke="${MIN}" stroke-width="5.5" stroke-linecap="round" class="hand-m" transform="rotate(${am})"/>`;
-  s += `<circle r="6.5" fill="${INK}"/><circle r="2" fill="#fff"/></svg>`;
   return s;
+}
+function clockHTML(t, hint){
+  return `<div class="clockbox" role="img" aria-label="시계 그림"><div class="rc" data-t="${t}"></div>${hint ? labelsHTML() : ''}</div>`;
 }
 
 /* ───────── 문제 만들기 ───────── */
@@ -406,21 +428,18 @@ function renderLevels(){
     `<button type="button" class="level" data-level="${l.id}" aria-pressed="${l.id===state.level}"><small>${l.id}단계</small><b>${l.name}</b><span>예) ${l.ex}</span></button>`
   ).join('');
 }
+$('#clock').innerHTML = `<div class="clockbox" role="img" aria-label="시계 그림"><div class="rc"></div><div id="mlabels" hidden>${labelsHTML()}</div></div>`;
+const mainClock = $('#clock .rc');
 function renderClock(){
-  const p = state.cur || {h:12, m:0};
-  $('#clock').innerHTML = clockSVG(p.h, p.m, state.hint);
-  if(state.phase !== 'answer') setHands(state.T);
+  if(state.phase === 'answer' && state.cur) state.T = minutesOf(state.cur);
+  $('#mlabels').hidden = !state.hint;
+  setHands(state.T);
 }
 
 /* ───────── 움직이는 시계 (멈춰서 읽기) ───────── */
 const SPEED = 12;               // 1초에 12분씩 움직임 (긴 바늘 한 바퀴 5초)
 let raf = 0, lastTs = 0;
-function setHands(T){           // T = 12시부터 지난 분
-  const c = $('#clock'), hh = c.querySelector('.hand-h'), mm = c.querySelector('.hand-m');
-  if(!hh) return;
-  hh.setAttribute('transform', `rotate(${(T/2)%360})`);
-  mm.setAttribute('transform', `rotate(${(T*6)%360})`);
-}
+function setHands(T){ Kit.render(mainClock, T); }   // T = 12시부터 지난 분
 function startRun(){
   cancelAnimationFrame(raf); lastTs = 0;
   const loop = ts => {
@@ -535,6 +554,7 @@ function onChoice(btn){
 }
 
 /* ───────── 종이 학습지 ───────── */
+let sheetClocks = [];
 function sheetCount(){ return +document.querySelector('input[name="cnt"]:checked').value; }
 function genSheet(){
   const step = levelOf().step, n = sheetCount(), used = new Set(), list = [];
@@ -546,7 +566,7 @@ function pageHTML(items, offset, pageNo, total, withAns){
   const cells = items.map((p, i) => {
     const hour = `<span class="p-blank">${withAns ? p.h : ''}</span>시`;
     const min = l.id === 1 ? '' : `<span class="p-blank">${withAns ? p.m : ''}</span>분`;
-    return `<div class="p-item"><span class="p-num">${offset+i+1}</span>${clockSVG(p.h, p.m, hint)}<div class="p-ans">${hour}${min}</div></div>`;
+    return `<div class="p-item"><span class="p-num">${offset+i+1}</span>${clockHTML(minutesOf(p), hint)}<div class="p-ans">${hour}${min}</div></div>`;
   }).join('');
   return `<article class="page">
     <div class="p-head"><div class="p-title">시계 보기 학습지</div><div class="p-badge${withAns?' ans':''}">${withAns?'정답 · ':''}${l.id}단계 · ${l.name}</div></div>
@@ -562,7 +582,10 @@ function renderSheet(){
   const ans = $('#optAns').checked, total = chunks.length*(ans?2:1);
   let html = chunks.map((c, i) => pageHTML(c, i*6, i+1, total, false)).join('');
   if(ans) html += chunks.map((c, i) => pageHTML(c, i*6, chunks.length+i+1, total, true)).join('');
+  sheetClocks.forEach(el => Kit.unmount(el));
   $('#pages').innerHTML = html;
+  sheetClocks = [...document.querySelectorAll('#pages .rc')];
+  sheetClocks.forEach(el => Kit.render(el, +el.dataset.t));
 }
 
 /* ───────── 설정: 확대 · 소리 · 탭 ───────── */
